@@ -1,3 +1,4 @@
+
 package com.queueforge.queueforge.job;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -24,7 +25,7 @@ public class StorageService {
                           SupabaseStorage supabase) throws IOException {
         this.supabase = supabase;
         this.originalsDir = Paths.get(baseDir, "originals").toAbsolutePath().normalize();
-        // Local folder is only needed when Supabase is not configured
+
         if (!supabase.enabled()) {
             Files.createDirectories(originalsDir);
         }
@@ -42,21 +43,35 @@ public class StorageService {
                 && ALLOWED.contains(extensionOf(file.getOriginalFilename()));
     }
 
-    /**
-     * Saves the file under a random name and returns the stored path.
-     * With Supabase: returns a bucket key like "originals/<uuid>.png".
-     * Without Supabase: returns the absolute local path, as before.
-     */
     public String saveOriginal(MultipartFile file) throws IOException {
         String ext = extensionOf(file.getOriginalFilename());
         String name = UUID.randomUUID() + "." + ext;
+
         if (supabase.enabled()) {
             String key = "originals/" + name;
             supabase.upload(key, file.getBytes(), SupabaseStorage.contentTypeFor(ext));
             return key;
         }
+
         Path target = originalsDir.resolve(name);
         file.transferTo(target);
         return target.toString();
+    }
+
+    public void deleteOriginal(String storedPath) throws IOException {
+        if (storedPath == null || storedPath.isBlank()) return;
+
+        if (supabase.enabled()) {
+            supabase.delete(storedPath);
+            return;
+        }
+
+        Path file = Paths.get(storedPath).toAbsolutePath().normalize();
+
+        if (!file.startsWith(originalsDir)) {
+            throw new IOException("Invalid original image path");
+        }
+
+        Files.deleteIfExists(file);
     }
 }

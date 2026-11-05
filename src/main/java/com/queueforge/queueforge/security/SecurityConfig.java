@@ -31,7 +31,10 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         configuration.setAllowedOrigins(
-            List.of("https://queue-forge.netlify.app")
+            List.of(
+                "https://queue-forge.netlify.app",
+                "http://localhost:5173"
+            )
         );
 
         configuration.setAllowedMethods(

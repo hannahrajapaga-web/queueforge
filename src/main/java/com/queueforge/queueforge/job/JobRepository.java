@@ -1,3 +1,4 @@
+
 package com.queueforge.queueforge.job;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,4 +12,6 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     List<Job> findByStatusAndUpdatedAtBefore(JobStatus status, Instant before);
     long countByStatus(JobStatus status);
     long countByStatusAndUpdatedAtAfter(JobStatus status, Instant after);
+
+    long countByUserId(Long userId);
 }

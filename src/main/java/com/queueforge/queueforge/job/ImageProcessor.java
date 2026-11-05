@@ -1,3 +1,4 @@
+
 package com.queueforge.queueforge.job;
 
 import net.coobird.thumbnailator.Thumbnails;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class ImageProcessor {
 
     private static final Map<String, Integer> SIZES = new LinkedHashMap<>();
+
     static {
         SIZES.put("small", 150);
         SIZES.put("medium", 600);
@@ -27,18 +29,22 @@ public class ImageProcessor {
     private final Path processedDir;
     private final SupabaseStorage supabase;
 
-    public ImageProcessor(@Value("${storage.dir:uploads}") String baseDir,
-                          SupabaseStorage supabase) {
+    public ImageProcessor(
+            @Value("${storage.dir:uploads}") String baseDir,
+            SupabaseStorage supabase) {
+
         this.supabase = supabase;
-        this.processedDir = Paths.get(baseDir, "processed").toAbsolutePath().normalize();
+        this.processedDir = Paths.get(baseDir, "processed")
+                .toAbsolutePath()
+                .normalize();
     }
 
-    /** Local folder for a job's processed images (used only when Supabase is not configured). */
+    /** Local folder for a job's processed images. */
     public Path outputDirFor(Long jobId) {
         return processedDir.resolve(String.valueOf(jobId));
     }
 
-    /** Bucket key for one processed size, e.g. "processed/12/small.png". */
+    /** Supabase key for one processed image. */
     public static String processedKey(Long jobId, String size, String ext) {
         return "processed/" + jobId + "/" + size + "." + ext;
     }
@@ -58,10 +64,14 @@ public class ImageProcessor {
     private void processOnDisk(Job job) throws IOException {
         File source = new File(job.getStoredPath());
         String ext = StorageService.extensionOf(source.getName());
+
         Path outDir = outputDirFor(job.getId());
         Files.createDirectories(outDir);
+
         for (Map.Entry<String, Integer> size : SIZES.entrySet()) {
-            File target = outDir.resolve(size.getKey() + "." + ext).toFile();
+            File target = outDir.resolve(
+                    size.getKey() + "." + ext).toFile();
+
             Thumbnails.of(source)
                     .size(size.getValue(), size.getValue())
                     .toFile(target);
@@ -71,19 +81,63 @@ public class ImageProcessor {
     private void processInSupabase(Job job) throws IOException {
         String key = job.getStoredPath();
         String ext = StorageService.extensionOf(key);
+
         byte[] original = supabase.download(key);
+
         if (original == null || original.length == 0) {
-            throw new IOException("Original image not found in storage: " + key);
+            throw new IOException(
+                    "Original image not found in storage: " + key);
         }
+
         String format = ext.equals("jpeg") ? "jpg" : ext;
+
         for (Map.Entry<String, Integer> size : SIZES.entrySet()) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
+
             Thumbnails.of(new ByteArrayInputStream(original))
                     .size(size.getValue(), size.getValue())
                     .outputFormat(format)
                     .toOutputStream(out);
-            supabase.upload(processedKey(job.getId(), size.getKey(), ext),
-                    out.toByteArray(), SupabaseStorage.contentTypeFor(ext));
+
+            supabase.upload(
+                    processedKey(job.getId(), size.getKey(), ext),
+                    out.toByteArray(),
+                    SupabaseStorage.contentTypeFor(ext));
+        }
+    }
+
+    /** Deletes all processed images belonging to a job. */
+    public void deleteProcessed(Long jobId, String storedPath)
+            throws IOException {
+
+        String ext = StorageService.extensionOf(storedPath);
+
+        if (supabase.enabled()) {
+            for (String size : SIZES.keySet()) {
+                supabase.delete(
+                        processedKey(jobId, size, ext));
+            }
+            return;
+        }
+
+        Path jobDir = outputDirFor(jobId)
+                .toAbsolutePath()
+                .normalize();
+
+        if (!jobDir.startsWith(processedDir)) {
+            throw new IOException("Invalid processed image path");
+        }
+
+        if (Files.exists(jobDir)) {
+            try (var files = Files.list(jobDir)) {
+                for (Path file : files.toList()) {
+                    if (Files.isRegularFile(file)) {
+                        Files.deleteIfExists(file);
+                    }
+                }
+            }
+
+            Files.deleteIfExists(jobDir);
         }
     }
 }
