@@ -1,3 +1,4 @@
+
 package com.queueforge.queueforge.job;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -9,7 +10,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -19,8 +19,10 @@ public class StatsController {
     private final StringRedisTemplate redis;
     private final int workerCount;
 
-    public StatsController(JobRepository jobs, StringRedisTemplate redis,
-                           @Value("${worker.count:3}") int workerCount) {
+    public StatsController(
+            JobRepository jobs,
+            StringRedisTemplate redis,
+            @Value("${worker.count:3}") int workerCount) {
         this.jobs = jobs;
         this.redis = redis;
         this.workerCount = workerCount;
@@ -28,32 +30,59 @@ public class StatsController {
 
     @GetMapping("/stats")
     public Map<String, Object> stats() {
+
         Map<String, Long> byStatus = new LinkedHashMap<>();
-        for (JobStatus s : JobStatus.values()) {
-            byStatus.put(s.name(), jobs.countByStatus(s));
+
+        for (JobStatus status : JobStatus.values()) {
+            byStatus.put(status.name(), 0L);
+        }
+
+        long totalJobs = 0;
+
+        for (Object[] row : jobs.countJobsGroupedByStatus()) {
+            JobStatus status = (JobStatus) row[0];
+            long count = ((Number) row[1]).longValue();
+
+            byStatus.put(status.name(), count);
+            totalJobs += count;
         }
 
         Map<String, Long> queues = new LinkedHashMap<>();
-        queues.put("pending", sizeOf(redis.opsForList().size(QueueService.PENDING)));
-        queues.put("delayedRetries", sizeOf(redis.opsForZSet().zCard(QueueService.DELAYED)));
-        queues.put("deadLetter", sizeOf(redis.opsForList().size(QueueService.DEAD)));
+
+        queues.put("pending",
+                sizeOf(redis.opsForList().size(QueueService.PENDING)));
+
+        queues.put("delayedRetries",
+                sizeOf(redis.opsForZSet().zCard(QueueService.DELAYED)));
+
+        queues.put("deadLetter",
+                sizeOf(redis.opsForList().size(QueueService.DEAD)));
 
         long processing = 0;
-        Set<String> keys = redis.keys(QueueService.PROCESSING_PREFIX + "*");
-        if (keys != null) {
-            for (String key : keys) {
-                processing += sizeOf(redis.opsForList().size(key));
-            }
+
+        for (int i = 1; i <= workerCount; i++) {
+            String processingKey =
+                    QueueService.PROCESSING_PREFIX + "worker-" + i;
+
+            processing += sizeOf(
+                    redis.opsForList().size(processingKey));
         }
+
         queues.put("processing", processing);
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("totalJobs", jobs.count());
+
+        out.put("totalJobs", totalJobs);
         out.put("jobsByStatus", byStatus);
         out.put("queues", queues);
+
         out.put("completedLastMinute",
-                jobs.countByStatusAndUpdatedAtAfter(JobStatus.COMPLETED, Instant.now().minusSeconds(60)));
+                jobs.countByStatusAndUpdatedAtAfter(
+                        JobStatus.COMPLETED,
+                        Instant.now().minusSeconds(60)));
+
         out.put("workers", workerCount);
+
         return out;
     }
 
